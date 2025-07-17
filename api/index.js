@@ -67,6 +67,24 @@ initializeDatabase().catch(err => {
     process.exit(1);
 });
 
+// Simplified connection check middleware
+const checkDBConnection = (req, res, next) => {
+    if (mongoose.connection.readyState === 1) {
+        return next();
+    }
+    
+    // For routes that don't need database
+    const skipRoutes = ['/', '/api', '/api/health', '/api/test'];
+    if (skipRoutes.includes(req.path)) {
+        return next();
+    }
+    
+    return res.status(500).json({
+        success: false,
+        message: 'Database not connected'
+    });
+};
+
 // JWT Configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'development-jwt-secret';
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'development-refresh-secret';
@@ -74,7 +92,7 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'development-re
 const ACCESS_TOKEN_EXPIRES_IN = '30d';
 const REFRESH_TOKEN_EXPIRES_IN = '90d';
 
-// Basic middleware
+// Middleware
 app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false
@@ -103,6 +121,9 @@ const limiter = rateLimit({
     message: { error: 'Too many requests' }
 });
 app.use(limiter);
+
+// Apply the simpler connection check
+app.use(checkDBConnection);
 
 // Error handler wrapper
 const asyncHandler = (fn) => (req, res, next) => {
@@ -159,7 +180,7 @@ const contactSubmissionSchema = new mongoose.Schema({
 
 const ContactSubmission = mongoose.models.ContactSubmission || mongoose.model('ContactSubmission', contactSubmissionSchema);
 
-// Authentication middleware (simplified)
+// Authentication middleware
 const authenticate = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
@@ -186,6 +207,34 @@ const authenticate = async (req, res, next) => {
     } catch (error) {
         return res.status(401).json({ message: 'Invalid token' });
     }
+};
+
+// Validation middleware
+const validateArticleData = (req, res, next) => {
+    const { title, tags, maintext, authorname } = req.body;
+    
+    if (!title || !tags || !maintext || !authorname) {
+        return res.status(400).json({
+            success: false,
+            message: 'Missing required fields'
+        });
+    }
+    
+    if (!Array.isArray(tags) || tags.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Tags must be a non-empty array'
+        });
+    }
+    
+    if (!Array.isArray(authorname) || authorname.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Author names must be a non-empty array'
+        });
+    }
+    
+    next();
 };
 
 // Rate limiters
@@ -472,30 +521,7 @@ app.get('/api/articles', asyncHandler(async (req, res) => {
     res.json({ success: true, data: result });
 }));
 
-app.post('/api/articles', authenticate, asyncHandler(async (req, res) => {
-    const { title, tags, maintext, authorname } = req.body;
-    
-    if (!title || !tags || !maintext || !authorname) {
-        return res.status(400).json({
-            success: false,
-            message: 'Missing required fields'
-        });
-    }
-    
-    if (!Array.isArray(tags) || tags.length === 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Tags must be a non-empty array'
-        });
-    }
-    
-    if (!Array.isArray(authorname) || authorname.length === 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Author names must be a non-empty array'
-        });
-    }
-    
+app.post('/api/articles', authenticate, validateArticleData, asyncHandler(async (req, res) => {
     if (!['admin', 'editor'].includes(req.user.role)) {
         return res.status(403).json({ message: 'Not authorized' });
     }
