@@ -41,7 +41,7 @@ const limiter = rateLimit({
     max: 100, // limit each IP to 100 requests per windowMs
     message: 'Too many requests from this IP, please try again later.'
 });
-app.use('/api/', limiter);
+app.use('/', limiter);
 
 // Database connection middleware for serverless
 const ensureDBConnection = async (req, res, next) => {
@@ -57,8 +57,8 @@ const ensureDBConnection = async (req, res, next) => {
     }
 };
 
-// Apply DB connection middleware to all API routes
-app.use('/api', ensureDBConnection);
+// Apply DB connection middleware to all routes
+app.use('/', ensureDBConnection);
 
 // Error handling middleware
 const asyncHandler = (fn) => (req, res, next) => {
@@ -95,6 +95,24 @@ const validateArticleData = (req, res, next) => {
 
 // Routes
 
+// Root route - API documentation
+app.get('/', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Pulpit Backend API',
+        version: '1.0.0',
+        endpoints: {
+            health: '/api/health',
+            articles: '/api/articles',
+            featured: '/api/articles/special/featured',
+            toppers: '/api/articles/special/toppers',
+            search: '/api/articles/search/title?q=query',
+            analytics: '/api/analytics/stats'
+        },
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({
@@ -104,58 +122,7 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// CREATE - Create new article
-app.post('/api/articles', validateArticleData, asyncHandler(async (req, res) => {
-    const article = await createArticle(req.body);
-    res.status(201).json({
-        success: true,
-        message: 'Article created successfully',
-        data: article
-    });
-}));
-
-// READ - Get all articles with pagination
-app.get('/api/articles', asyncHandler(async (req, res) => {
-    const { page = 1, limit = 10, status = 'published' } = req.query;
-    const result = await getAllArticles(parseInt(page), parseInt(limit), status);
-    res.json({
-        success: true,
-        data: result
-    });
-}));
-
-// READ - Get article by ID
-app.get('/api/articles/:id', asyncHandler(async (req, res) => {
-    const article = await getArticleById(req.params.id);
-    res.json({
-        success: true,
-        data: article
-    });
-}));
-
-// READ - Get articles by tags
-app.get('/api/articles/tags/:tags', asyncHandler(async (req, res) => {
-    const { page = 1, limit = 10 } = req.query;
-    const tags = req.params.tags.split(',').map(tag => tag.trim());
-    const result = await getArticlesByTags(tags, parseInt(page), parseInt(limit));
-    res.json({
-        success: true,
-        data: result
-    });
-}));
-
-// READ - Get articles by authors
-app.get('/api/articles/authors/:authors', asyncHandler(async (req, res) => {
-    const { page = 1, limit = 10 } = req.query;
-    const authors = req.params.authors.split(',').map(author => author.trim());
-    const result = await getArticlesByAuthors(authors, parseInt(page), parseInt(limit));
-    res.json({
-        success: true,
-        data: result
-    });
-}));
-
-// READ - Get topper articles
+// Move specific routes BEFORE the general /api/articles route
 app.get('/api/articles/special/toppers', asyncHandler(async (req, res) => {
     const { limit = 5 } = req.query;
     const articles = await getTopperArticles(parseInt(limit));
@@ -165,7 +132,6 @@ app.get('/api/articles/special/toppers', asyncHandler(async (req, res) => {
     });
 }));
 
-// READ - Get featured articles
 app.get('/api/articles/special/featured', asyncHandler(async (req, res) => {
     const { limit = 10 } = req.query;
     const articles = await getFeaturedArticles(parseInt(limit));
@@ -175,7 +141,6 @@ app.get('/api/articles/special/featured', asyncHandler(async (req, res) => {
     });
 }));
 
-// READ - Search articles by title
 app.get('/api/articles/search/title', asyncHandler(async (req, res) => {
     const { q, page = 1, limit = 10 } = req.query;
     
@@ -193,7 +158,6 @@ app.get('/api/articles/search/title', asyncHandler(async (req, res) => {
     });
 }));
 
-// READ - Full text search
 app.get('/api/articles/search/full', asyncHandler(async (req, res) => {
     const { q, page = 1, limit = 10 } = req.query;
     
@@ -211,7 +175,6 @@ app.get('/api/articles/search/full', asyncHandler(async (req, res) => {
     });
 }));
 
-// READ - Get articles by date range
 app.get('/api/articles/date-range', asyncHandler(async (req, res) => {
     const { startDate, endDate, page = 1, limit = 10 } = req.query;
     
@@ -229,7 +192,52 @@ app.get('/api/articles/date-range', asyncHandler(async (req, res) => {
     });
 }));
 
-// UPDATE - Update article
+app.get('/api/articles/tags/:tags', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const tags = req.params.tags.split(',').map(tag => tag.trim());
+    const result = await getArticlesByTags(tags, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+app.get('/api/articles/authors/:authors', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const authors = req.params.authors.split(',').map(author => author.trim());
+    const result = await getArticlesByAuthors(authors, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+app.get('/api/articles/:id', asyncHandler(async (req, res) => {
+    const article = await getArticleById(req.params.id);
+    res.json({
+        success: true,
+        data: article
+    });
+}));
+
+app.get('/api/articles', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10, status = 'published' } = req.query;
+    const result = await getAllArticles(parseInt(page), parseInt(limit), status);
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+app.post('/api/articles', validateArticleData, asyncHandler(async (req, res) => {
+    const article = await createArticle(req.body);
+    res.status(201).json({
+        success: true,
+        message: 'Article created successfully',
+        data: article
+    });
+}));
+
 app.put('/api/articles/:id', asyncHandler(async (req, res) => {
     const article = await updateArticle(req.params.id, req.body);
     res.json({
@@ -239,7 +247,6 @@ app.put('/api/articles/:id', asyncHandler(async (req, res) => {
     });
 }));
 
-// DELETE - Delete article
 app.delete('/api/articles/:id', asyncHandler(async (req, res) => {
     const article = await deleteArticle(req.params.id);
     res.json({
@@ -249,7 +256,6 @@ app.delete('/api/articles/:id', asyncHandler(async (req, res) => {
     });
 }));
 
-// UTILITY - Increment views
 app.patch('/api/articles/:id/views', asyncHandler(async (req, res) => {
     const article = await incrementViews(req.params.id);
     res.json({
@@ -259,7 +265,6 @@ app.patch('/api/articles/:id/views', asyncHandler(async (req, res) => {
     });
 }));
 
-// UTILITY - Toggle featured status
 app.patch('/api/articles/:id/featured', asyncHandler(async (req, res) => {
     const article = await toggleFeatured(req.params.id);
     res.json({
@@ -269,7 +274,6 @@ app.patch('/api/articles/:id/featured', asyncHandler(async (req, res) => {
     });
 }));
 
-// UTILITY - Toggle topper status
 app.patch('/api/articles/:id/topper', asyncHandler(async (req, res) => {
     const article = await toggleTopper(req.params.id);
     res.json({
@@ -279,7 +283,6 @@ app.patch('/api/articles/:id/topper', asyncHandler(async (req, res) => {
     });
 }));
 
-// ANALYTICS - Get article statistics
 app.get('/api/analytics/stats', asyncHandler(async (req, res) => {
     const stats = await getArticleStats();
     res.json({
@@ -300,7 +303,6 @@ app.use('*', (req, res) => {
 app.use((error, req, res, next) => {
     console.error('Error:', error.message);
     
-    // MongoDB validation errors
     if (error.name === 'ValidationError') {
         const errors = Object.values(error.errors).map(err => err.message);
         return res.status(400).json({
@@ -310,7 +312,6 @@ app.use((error, req, res, next) => {
         });
     }
     
-    // MongoDB cast errors (invalid ObjectId)
     if (error.name === 'CastError') {
         return res.status(400).json({
             success: false,
@@ -318,7 +319,6 @@ app.use((error, req, res, next) => {
         });
     }
     
-    // Duplicate key error
     if (error.code === 11000) {
         return res.status(400).json({
             success: false,
@@ -326,14 +326,13 @@ app.use((error, req, res, next) => {
         });
     }
     
-    // Default error
     res.status(500).json({
         success: false,
         message: error.message || 'Internal server error'
     });
 });
 
-// For Vercel deployment, don't start the server if we're in production
+// Only start server if not in production (for local development)
 if (process.env.NODE_ENV !== 'production') {
     app.listen(PORT, () => {
         console.log(`Server running on port ${PORT}`);
