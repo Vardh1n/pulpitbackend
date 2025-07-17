@@ -27,7 +27,7 @@ const {
     toggleFeatured,
     toggleTopper,
     getArticleStats
-} = require('./databaseUtils');
+} = require('../databaseUtils');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
