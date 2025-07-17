@@ -9,6 +9,17 @@ const mongoose = require('mongoose');
 // Add dotenv configuration at the top
 require('dotenv').config();
 
+// Validate required environment variables
+const requiredEnvVars = ['MONGODB_URI'];
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingEnvVars.length > 0) {
+    console.error('Missing required environment variables:', missingEnvVars);
+    process.exit(1);
+}
+
+console.log('Environment check passed');
+
 // Import database utilities
 const {
     connectDB,
@@ -69,34 +80,60 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Database connection for serverless
+// Database connection for serverless with retry logic
 const ensureDBConnection = async (req, res, next) => {
-    try {
-        if (mongoose.connection.readyState === 1) {
-            return next();
-        }
-        
-        if (mongoose.connection.readyState === 2) {
-            // Connection is connecting, wait for it
-            await new Promise((resolve, reject) => {
-                mongoose.connection.once('connected', resolve);
-                mongoose.connection.once('error', reject);
-                setTimeout(() => reject(new Error('Connection timeout')), 10000);
+    const maxRetries = 3;
+    let retryCount = 0;
+    
+    const attemptConnection = async () => {
+        try {
+            if (mongoose.connection.readyState === 1) {
+                return next();
+            }
+            
+            if (mongoose.connection.readyState === 2) {
+                // Connection is connecting, wait for it
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Connection timeout'));
+                    }, 15000);
+                    
+                    mongoose.connection.once('connected', () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    });
+                    
+                    mongoose.connection.once('error', (err) => {
+                        clearTimeout(timeout);
+                        reject(err);
+                    });
+                });
+                return next();
+            }
+            
+            await connectDB();
+            console.log('Database connected successfully');
+            next();
+        } catch (error) {
+            retryCount++;
+            console.error(`Database connection attempt ${retryCount} failed:`, error.message);
+            
+            if (retryCount < maxRetries) {
+                console.log(`Retrying connection in 2 seconds... (${retryCount}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                return attemptConnection();
+            }
+            
+            console.error('All connection attempts failed');
+            res.status(500).json({
+                success: false,
+                message: 'Database connection failed after multiple attempts',
+                error: process.env.NODE_ENV === 'development' ? error.message : undefined
             });
-            return next();
         }
-        
-        await connectDB();
-        console.log('Database connected successfully');
-        next();
-    } catch (error) {
-        console.error('Database connection error:', error.message);
-        res.status(500).json({
-            success: false,
-            message: 'Database connection failed',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
+    };
+    
+    await attemptConnection();
 };
 
 app.use(ensureDBConnection);
@@ -574,6 +611,42 @@ app.patch('/api/articles/:id/topper', authenticate, asyncHandler(async (req, res
 app.get('/api/analytics/stats', asyncHandler(async (req, res) => {
     const stats = await getArticleStats();
     res.json({ success: true, data: stats });
+}));
+
+// Database connection test endpoint
+app.get('/api/db-test', asyncHandler(async (req, res) => {
+    try {
+        const dbState = mongoose.connection.readyState;
+        const stateMap = {
+            0: 'disconnected',
+            1: 'connected',
+            2: 'connecting',
+            3: 'disconnecting'
+        };
+        
+        if (dbState === 1) {
+            // Test with a simple query
+            const testResult = await mongoose.connection.db.admin().ping();
+            res.json({
+                success: true,
+                message: 'Database connection is healthy',
+                state: stateMap[dbState],
+                ping: testResult
+            });
+        } else {
+            res.json({
+                success: false,
+                message: 'Database not connected',
+                state: stateMap[dbState]
+            });
+        }
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Database connection test failed',
+            error: error.message
+        });
+    }
 }));
 
 // 404 handler
