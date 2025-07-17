@@ -5,9 +5,10 @@ const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
+const path = require('path');
 
-// Add dotenv configuration at the top
-require('dotenv').config();
+// Add dotenv configuration pointing to the correct .env file
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 // Validate required environment variables
 const requiredEnvVars = ['MONGODB_URI'];
