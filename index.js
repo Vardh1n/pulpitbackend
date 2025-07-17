@@ -116,35 +116,25 @@ app.use((req, res, next) => {
     res.on('finish', () => clearTimeout(timeout));
     next();
 });
+let cachedDb = null;
 
-async function connectToDatabase() {
-    if (cachedDb && mongoose.connection.readyState === 1) {
-        return cachedDb;
-    }
-    
-    try {
-        if (mongoose.connection.readyState === 0) {
-            await connectDB();
-        }
-        cachedDb = mongoose.connection;
-        console.log('Successfully connected to MongoDB');
-        return cachedDb;
-    } catch (error) {
-        console.error('MongoDB connection error:', error);
-        throw error;
-    }
-}
 // Database connection middleware for serverless
 const ensureDBConnection = async (req, res, next) => {
     try {
-        await connectToDatabase();
+        // Check if already connected
+        if (mongoose.connection.readyState === 1) {
+            return next();
+        }
+        
+        // Connect to database
+        await connectDB();
+        console.log('Successfully connected to MongoDB');
         next();
     } catch (error) {
         console.error('Database connection error:', error);
         res.status(500).json({
             success: false,
-            message: 'Database connection failed',
-            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+            message: 'Database connection failed'
         });
     }
 };
@@ -335,6 +325,15 @@ app.get('/api/health', (req, res) => {
     res.json({
         success: true,
         message: 'Server is running',
+        timestamp: new Date().toISOString(),
+        env: process.env.NODE_ENV || 'development'
+    });
+});
+
+app.get('/api/test', (req, res) => {
+    res.json({
+        success: true,
+        message: 'Test endpoint working',
         timestamp: new Date().toISOString()
     });
 });
