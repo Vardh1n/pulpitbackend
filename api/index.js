@@ -44,6 +44,29 @@ const {
 
 const app = express();
 
+// Initialize database connection at startup
+let dbInitialized = false;
+
+const initializeDatabase = async () => {
+    if (dbInitialized) return;
+    
+    try {
+        console.log('Initializing database connection...');
+        await connectDB();
+        dbInitialized = true;
+        console.log('Database initialized successfully');
+    } catch (error) {
+        console.error('Failed to initialize database:', error);
+        throw error;
+    }
+};
+
+// Initialize database immediately
+initializeDatabase().catch(err => {
+    console.error('Database initialization failed:', err);
+    process.exit(1);
+});
+
 // JWT Configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'development-jwt-secret';
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'development-refresh-secret';
@@ -51,7 +74,7 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'development-re
 const ACCESS_TOKEN_EXPIRES_IN = '30d';
 const REFRESH_TOKEN_EXPIRES_IN = '90d';
 
-// Middleware
+// Basic middleware
 app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false
@@ -80,64 +103,6 @@ const limiter = rateLimit({
     message: { error: 'Too many requests' }
 });
 app.use(limiter);
-
-// Database connection for serverless with retry logic
-const ensureDBConnection = async (req, res, next) => {
-    const maxRetries = 3;
-    let retryCount = 0;
-    
-    const attemptConnection = async () => {
-        try {
-            if (mongoose.connection.readyState === 1) {
-                return next();
-            }
-            
-            if (mongoose.connection.readyState === 2) {
-                // Connection is connecting, wait for it
-                await new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => {
-                        reject(new Error('Connection timeout'));
-                    }, 15000);
-                    
-                    mongoose.connection.once('connected', () => {
-                        clearTimeout(timeout);
-                        resolve();
-                    });
-                    
-                    mongoose.connection.once('error', (err) => {
-                        clearTimeout(timeout);
-                        reject(err);
-                    });
-                });
-                return next();
-            }
-            
-            await connectDB();
-            console.log('Database connected successfully');
-            next();
-        } catch (error) {
-            retryCount++;
-            console.error(`Database connection attempt ${retryCount} failed:`, error.message);
-            
-            if (retryCount < maxRetries) {
-                console.log(`Retrying connection in 2 seconds... (${retryCount}/${maxRetries})`);
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                return attemptConnection();
-            }
-            
-            console.error('All connection attempts failed');
-            res.status(500).json({
-                success: false,
-                message: 'Database connection failed after multiple attempts',
-                error: process.env.NODE_ENV === 'development' ? error.message : undefined
-            });
-        }
-    };
-    
-    await attemptConnection();
-};
-
-app.use(ensureDBConnection);
 
 // Error handler wrapper
 const asyncHandler = (fn) => (req, res, next) => {
@@ -194,7 +159,7 @@ const contactSubmissionSchema = new mongoose.Schema({
 
 const ContactSubmission = mongoose.models.ContactSubmission || mongoose.model('ContactSubmission', contactSubmissionSchema);
 
-// Authentication middleware
+// Authentication middleware (simplified)
 const authenticate = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
@@ -221,34 +186,6 @@ const authenticate = async (req, res, next) => {
     } catch (error) {
         return res.status(401).json({ message: 'Invalid token' });
     }
-};
-
-// Validation middleware
-const validateArticleData = (req, res, next) => {
-    const { title, tags, maintext, authorname } = req.body;
-    
-    if (!title || !tags || !maintext || !authorname) {
-        return res.status(400).json({
-            success: false,
-            message: 'Missing required fields'
-        });
-    }
-    
-    if (!Array.isArray(tags) || tags.length === 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Tags must be a non-empty array'
-        });
-    }
-    
-    if (!Array.isArray(authorname) || authorname.length === 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Author names must be a non-empty array'
-        });
-    }
-    
-    next();
 };
 
 // Rate limiters
@@ -535,7 +472,30 @@ app.get('/api/articles', asyncHandler(async (req, res) => {
     res.json({ success: true, data: result });
 }));
 
-app.post('/api/articles', authenticate, validateArticleData, asyncHandler(async (req, res) => {
+app.post('/api/articles', authenticate, asyncHandler(async (req, res) => {
+    const { title, tags, maintext, authorname } = req.body;
+    
+    if (!title || !tags || !maintext || !authorname) {
+        return res.status(400).json({
+            success: false,
+            message: 'Missing required fields'
+        });
+    }
+    
+    if (!Array.isArray(tags) || tags.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Tags must be a non-empty array'
+        });
+    }
+    
+    if (!Array.isArray(authorname) || authorname.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Author names must be a non-empty array'
+        });
+    }
+    
     if (!['admin', 'editor'].includes(req.user.role)) {
         return res.status(403).json({ message: 'Not authorized' });
     }
