@@ -51,13 +51,7 @@ app.use(helmet({
 }));
 
 // Allowed origins for CORS
-const allowedOrigins = [
-    'https://politicalgossips.vercel.app',
-    'https://politicalgossips.com',
-    'https://www.politicalgossips.com',
-    'https://politicalgossips-frontend-three.vercel.app',
-    'https://politicalgossips-frontend-lim4hpu1x-vardh1n.vercel.app'
-];
+const allowedOrigins = ['*'];
 
 // API access middleware
 const apiAccessMiddleware = (req, res, next) => {
