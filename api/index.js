@@ -92,7 +92,7 @@ const validateArticleData = (req, res, next) => {
     next();
 };
 
-// Routes (remove /api prefix since we're in the api directory)
+// Routes (without /api prefix since we're in the api directory)
 
 // Health check
 app.get('/health', (req, res) => {
@@ -103,7 +103,197 @@ app.get('/health', (req, res) => {
     });
 });
 
-// ...existing code... (all your routes but remove /api prefix)
+// CREATE - Create new article
+app.post('/articles', validateArticleData, asyncHandler(async (req, res) => {
+    const article = await createArticle(req.body);
+    res.status(201).json({
+        success: true,
+        message: 'Article created successfully',
+        data: article
+    });
+}));
+
+// READ - Get all articles with pagination
+app.get('/articles', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10, status = 'published' } = req.query;
+    const result = await getAllArticles(parseInt(page), parseInt(limit), status);
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get article by ID
+app.get('/articles/:id', asyncHandler(async (req, res) => {
+    const article = await getArticleById(req.params.id);
+    res.json({
+        success: true,
+        data: article
+    });
+}));
+
+// READ - Get articles by tags
+app.get('/articles/tags/:tags', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const tags = req.params.tags.split(',').map(tag => tag.trim());
+    const result = await getArticlesByTags(tags, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get articles by authors
+app.get('/articles/authors/:authors', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const authors = req.params.authors.split(',').map(author => author.trim());
+    const result = await getArticlesByAuthors(authors, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get topper articles
+app.get('/articles/special/toppers', asyncHandler(async (req, res) => {
+    const { limit = 5 } = req.query;
+    const articles = await getTopperArticles(parseInt(limit));
+    res.json({
+        success: true,
+        data: articles
+    });
+}));
+
+// READ - Get featured articles
+app.get('/articles/special/featured', asyncHandler(async (req, res) => {
+    const { limit = 10 } = req.query;
+    const articles = await getFeaturedArticles(parseInt(limit));
+    res.json({
+        success: true,
+        data: articles
+    });
+}));
+
+// READ - Search articles by title
+app.get('/articles/search/title', asyncHandler(async (req, res) => {
+    const { q, page = 1, limit = 10 } = req.query;
+    
+    if (!q) {
+        return res.status(400).json({
+            success: false,
+            message: 'Search query is required'
+        });
+    }
+    
+    const result = await searchArticlesByTitle(q, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Full text search
+app.get('/articles/search/full', asyncHandler(async (req, res) => {
+    const { q, page = 1, limit = 10 } = req.query;
+    
+    if (!q) {
+        return res.status(400).json({
+            success: false,
+            message: 'Search query is required'
+        });
+    }
+    
+    const result = await searchArticles(q, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get articles by date range
+app.get('/articles/date-range', asyncHandler(async (req, res) => {
+    const { startDate, endDate, page = 1, limit = 10 } = req.query;
+    
+    if (!startDate || !endDate) {
+        return res.status(400).json({
+            success: false,
+            message: 'Both startDate and endDate are required'
+        });
+    }
+    
+    const result = await getArticlesByDateRange(startDate, endDate, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// UPDATE - Update article
+app.put('/articles/:id', asyncHandler(async (req, res) => {
+    const article = await updateArticle(req.params.id, req.body);
+    res.json({
+        success: true,
+        message: 'Article updated successfully',
+        data: article
+    });
+}));
+
+// DELETE - Delete article
+app.delete('/articles/:id', asyncHandler(async (req, res) => {
+    const article = await deleteArticle(req.params.id);
+    res.json({
+        success: true,
+        message: 'Article deleted successfully',
+        data: article
+    });
+}));
+
+// UTILITY - Increment views
+app.patch('/articles/:id/views', asyncHandler(async (req, res) => {
+    const article = await incrementViews(req.params.id);
+    res.json({
+        success: true,
+        message: 'Views incremented successfully',
+        data: article
+    });
+}));
+
+// UTILITY - Toggle featured status
+app.patch('/articles/:id/featured', asyncHandler(async (req, res) => {
+    const article = await toggleFeatured(req.params.id);
+    res.json({
+        success: true,
+        message: 'Featured status toggled successfully',
+        data: article
+    });
+}));
+
+// UTILITY - Toggle topper status
+app.patch('/articles/:id/topper', asyncHandler(async (req, res) => {
+    const article = await toggleTopper(req.params.id);
+    res.json({
+        success: true,
+        message: 'Topper status toggled successfully',
+        data: article
+    });
+}));
+
+// ANALYTICS - Get article statistics
+app.get('/analytics/stats', asyncHandler(async (req, res) => {
+    const stats = await getArticleStats();
+    res.json({
+        success: true,
+        data: stats
+    });
+}));
+
+// 404 handler
+app.use('*', (req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'Route not found'
+    });
+});
 
 // Error handling middleware
 app.use((error, req, res, next) => {
