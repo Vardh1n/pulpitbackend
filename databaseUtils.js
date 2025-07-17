@@ -1,34 +1,24 @@
 const mongoose = require('mongoose');
 
-let cached = global.mongoose;
-
-if (!cached) {
-    cached = global.mongoose = { conn: null, promise: null };
-}
-
 const connectDB = async () => {
-    if (cached.conn) {
-        return cached.conn;
-    }
-
-    if (!cached.promise) {
-        const opts = {
-            bufferCommands: false,
-        };
-
-        cached.promise = mongoose.connect(process.env.MONGODB_URI, opts).then((mongoose) => {
-            return mongoose;
-        });
-    }
-
     try {
-        cached.conn = await cached.promise;
-    } catch (e) {
-        cached.promise = null;
-        throw e;
+        if (mongoose.connection.readyState === 1) {
+            return mongoose.connection;
+        }
+        
+        const conn = await mongoose.connect(process.env.MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 5000, // 5 second timeout
+            socketTimeoutMS: 45000, // 45 second socket timeout
+        });
+        
+        console.log(`MongoDB Connected: ${conn.connection.host}`);
+        return conn;
+    } catch (error) {
+        console.error('Database connection error:', error);
+        throw error;
     }
-
-    return cached.conn;
 };
 
 // Article Schema

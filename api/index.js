@@ -76,14 +76,25 @@ const ensureDBConnection = async (req, res, next) => {
             return next();
         }
         
+        if (mongoose.connection.readyState === 2) {
+            // Connection is connecting, wait for it
+            await new Promise((resolve, reject) => {
+                mongoose.connection.once('connected', resolve);
+                mongoose.connection.once('error', reject);
+                setTimeout(() => reject(new Error('Connection timeout')), 10000);
+            });
+            return next();
+        }
+        
         await connectDB();
-        console.log('Database connected');
+        console.log('Database connected successfully');
         next();
     } catch (error) {
-        console.error('Database connection error:', error);
+        console.error('Database connection error:', error.message);
         res.status(500).json({
             success: false,
-            message: 'Database connection failed'
+            message: 'Database connection failed',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
