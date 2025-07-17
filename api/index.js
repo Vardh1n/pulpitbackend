@@ -44,45 +44,33 @@ const {
 
 const app = express();
 
-// Initialize database connection at startup
-let dbInitialized = false;
-
-const initializeDatabase = async () => {
-    if (dbInitialized) return;
-    
-    try {
-        console.log('Initializing database connection...');
-        await connectDB();
-        dbInitialized = true;
-        console.log('Database initialized successfully');
-    } catch (error) {
-        console.error('Failed to initialize database:', error);
-        throw error;
-    }
-};
-
-// Initialize database immediately
-initializeDatabase().catch(err => {
-    console.error('Database initialization failed:', err);
-    process.exit(1);
-});
-
-// Simplified connection check middleware
-const checkDBConnection = (req, res, next) => {
+// Serverless-friendly database connection
+const ensureDBConnection = async () => {
     if (mongoose.connection.readyState === 1) {
-        return next();
+        return; // Already connected
     }
     
-    // For routes that don't need database
-    const skipRoutes = ['/', '/api', '/api/health', '/api/test'];
-    if (skipRoutes.includes(req.path)) {
-        return next();
+    if (mongoose.connection.readyState === 2) {
+        // Connection is connecting, wait for it
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error('Database connection timeout'));
+            }, 10000);
+            
+            mongoose.connection.once('connected', () => {
+                clearTimeout(timeout);
+                resolve();
+            });
+            
+            mongoose.connection.once('error', (err) => {
+                clearTimeout(timeout);
+                reject(err);
+            });
+        });
     }
     
-    return res.status(500).json({
-        success: false,
-        message: 'Database not connected'
-    });
+    // Not connected, establish connection
+    await connectDB();
 };
 
 // JWT Configuration
@@ -92,7 +80,7 @@ const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'development-re
 const ACCESS_TOKEN_EXPIRES_IN = '30d';
 const REFRESH_TOKEN_EXPIRES_IN = '90d';
 
-// Middleware
+// Basic middleware
 app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginEmbedderPolicy: false
@@ -108,26 +96,39 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request logging
+// Request logging (lighter for serverless)
 app.use((req, res, next) => {
-    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    console.log(`${req.method} ${req.path}`);
     next();
 });
 
-// Rate limiting
+// Lighter rate limiting for serverless
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
-    message: { error: 'Too many requests' }
+    message: { error: 'Too many requests' },
+    standardHeaders: true,
+    legacyHeaders: false,
 });
 app.use(limiter);
-
-// Apply the simpler connection check
-app.use(checkDBConnection);
 
 // Error handler wrapper
 const asyncHandler = (fn) => (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch(next);
+};
+
+// Database connection middleware for routes that need it
+const withDB = (handler) => async (req, res, next) => {
+    try {
+        await ensureDBConnection();
+        return handler(req, res, next);
+    } catch (error) {
+        console.error('Database connection failed:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Database connection failed'
+        });
+    }
 };
 
 // User Schema
@@ -192,6 +193,8 @@ const authenticate = async (req, res, next) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
         
+        await ensureDBConnection();
+        
         const user = await User.findById(decoded.id);
         if (!user) {
             return res.status(401).json({ message: 'User not found' });
@@ -209,34 +212,6 @@ const authenticate = async (req, res, next) => {
     }
 };
 
-// Validation middleware
-const validateArticleData = (req, res, next) => {
-    const { title, tags, maintext, authorname } = req.body;
-    
-    if (!title || !tags || !maintext || !authorname) {
-        return res.status(400).json({
-            success: false,
-            message: 'Missing required fields'
-        });
-    }
-    
-    if (!Array.isArray(tags) || tags.length === 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Tags must be a non-empty array'
-        });
-    }
-    
-    if (!Array.isArray(authorname) || authorname.length === 0) {
-        return res.status(400).json({
-            success: false,
-            message: 'Author names must be a non-empty array'
-        });
-    }
-    
-    next();
-};
-
 // Rate limiters
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -250,7 +225,7 @@ const contactLimiter = rateLimit({
     message: { error: 'Too many contact submissions' }
 });
 
-// Routes
+// Routes that don't need database
 app.get('/', (req, res) => {
     res.json({
         success: true,
@@ -285,8 +260,8 @@ app.get('/api/test', (req, res) => {
     });
 });
 
-// Auth routes
-app.post('/api/auth/register', asyncHandler(async (req, res) => {
+// Auth routes with database
+app.post('/api/auth/register', authLimiter, withDB(asyncHandler(async (req, res) => {
     const { username, password, role } = req.body;
     
     if (!username || !password) {
@@ -310,9 +285,9 @@ app.post('/api/auth/register', asyncHandler(async (req, res) => {
         success: true,
         message: 'User created successfully' 
     });
-}));
+})));
 
-app.post('/api/auth/login', authLimiter, asyncHandler(async (req, res) => {
+app.post('/api/auth/login', authLimiter, withDB(asyncHandler(async (req, res) => {
     const { username, password } = req.body;
     
     if (!username || !password) {
@@ -354,9 +329,9 @@ app.post('/api/auth/login', authLimiter, asyncHandler(async (req, res) => {
             role: user.role
         }
     });
-}));
+})));
 
-app.post('/api/auth/refresh', asyncHandler(async (req, res) => {
+app.post('/api/auth/refresh', withDB(asyncHandler(async (req, res) => {
     const { refreshToken } = req.body;
     
     if (!refreshToken) {
@@ -380,10 +355,10 @@ app.post('/api/auth/refresh', asyncHandler(async (req, res) => {
         success: true,
         accessToken 
     });
-}));
+})));
 
 // Contact form
-app.post('/api/contact', contactLimiter, asyncHandler(async (req, res) => {
+app.post('/api/contact', contactLimiter, withDB(asyncHandler(async (req, res) => {
     const { name, email, message } = req.body;
 
     if (!message || !message.trim()) {
@@ -411,7 +386,7 @@ app.post('/api/contact', contactLimiter, asyncHandler(async (req, res) => {
         message: 'Message received',
         submissionId: submission._id
     });
-}));
+})));
 
 // Admin contact submissions
 app.get('/api/admin/contact-submissions', authenticate, asyncHandler(async (req, res) => {
@@ -441,20 +416,20 @@ app.get('/api/admin/contact-submissions', authenticate, asyncHandler(async (req,
     });
 }));
 
-// Article routes
-app.get('/api/articles/special/toppers', asyncHandler(async (req, res) => {
+// Article routes with database
+app.get('/api/articles/special/toppers', withDB(asyncHandler(async (req, res) => {
     const { limit = 5 } = req.query;
     const articles = await getTopperArticles(parseInt(limit));
     res.json({ success: true, data: articles });
-}));
+})));
 
-app.get('/api/articles/special/featured', asyncHandler(async (req, res) => {
+app.get('/api/articles/special/featured', withDB(asyncHandler(async (req, res) => {
     const { limit = 10 } = req.query;
     const articles = await getFeaturedArticles(parseInt(limit));
     res.json({ success: true, data: articles });
-}));
+})));
 
-app.get('/api/articles/search/title', asyncHandler(async (req, res) => {
+app.get('/api/articles/search/title', withDB(asyncHandler(async (req, res) => {
     const { q, page = 1, limit = 10 } = req.query;
     
     if (!q) {
@@ -466,9 +441,9 @@ app.get('/api/articles/search/title', asyncHandler(async (req, res) => {
     
     const result = await searchArticlesByTitle(q, parseInt(page), parseInt(limit));
     res.json({ success: true, data: result });
-}));
+})));
 
-app.get('/api/articles/search/full', asyncHandler(async (req, res) => {
+app.get('/api/articles/search/full', withDB(asyncHandler(async (req, res) => {
     const { q, page = 1, limit = 10 } = req.query;
     
     if (!q) {
@@ -480,9 +455,9 @@ app.get('/api/articles/search/full', asyncHandler(async (req, res) => {
     
     const result = await searchArticles(q, parseInt(page), parseInt(limit));
     res.json({ success: true, data: result });
-}));
+})));
 
-app.get('/api/articles/date-range', asyncHandler(async (req, res) => {
+app.get('/api/articles/date-range', withDB(asyncHandler(async (req, res) => {
     const { startDate, endDate, page = 1, limit = 10 } = req.query;
     
     if (!startDate || !endDate) {
@@ -494,34 +469,57 @@ app.get('/api/articles/date-range', asyncHandler(async (req, res) => {
     
     const result = await getArticlesByDateRange(startDate, endDate, parseInt(page), parseInt(limit));
     res.json({ success: true, data: result });
-}));
+})));
 
-app.get('/api/articles/tags/:tags', asyncHandler(async (req, res) => {
+app.get('/api/articles/tags/:tags', withDB(asyncHandler(async (req, res) => {
     const { page = 1, limit = 10 } = req.query;
     const tags = req.params.tags.split(',').map(tag => tag.trim());
     const result = await getArticlesByTags(tags, parseInt(page), parseInt(limit));
     res.json({ success: true, data: result });
-}));
+})));
 
-app.get('/api/articles/authors/:authors', asyncHandler(async (req, res) => {
+app.get('/api/articles/authors/:authors', withDB(asyncHandler(async (req, res) => {
     const { page = 1, limit = 10 } = req.query;
     const authors = req.params.authors.split(',').map(author => author.trim());
     const result = await getArticlesByAuthors(authors, parseInt(page), parseInt(limit));
     res.json({ success: true, data: result });
-}));
+})));
 
-app.get('/api/articles/:id', asyncHandler(async (req, res) => {
+app.get('/api/articles/:id', withDB(asyncHandler(async (req, res) => {
     const article = await getArticleById(req.params.id);
     res.json({ success: true, data: article });
-}));
+})));
 
-app.get('/api/articles', asyncHandler(async (req, res) => {
+app.get('/api/articles', withDB(asyncHandler(async (req, res) => {
     const { page = 1, limit = 10, status = 'published' } = req.query;
     const result = await getAllArticles(parseInt(page), parseInt(limit), status);
     res.json({ success: true, data: result });
-}));
+})));
 
-app.post('/api/articles', authenticate, validateArticleData, asyncHandler(async (req, res) => {
+app.post('/api/articles', authenticate, asyncHandler(async (req, res) => {
+    const { title, tags, maintext, authorname } = req.body;
+    
+    if (!title || !tags || !maintext || !authorname) {
+        return res.status(400).json({
+            success: false,
+            message: 'Missing required fields'
+        });
+    }
+    
+    if (!Array.isArray(tags) || tags.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Tags must be a non-empty array'
+        });
+    }
+    
+    if (!Array.isArray(authorname) || authorname.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: 'Author names must be a non-empty array'
+        });
+    }
+    
     if (!['admin', 'editor'].includes(req.user.role)) {
         return res.status(403).json({ message: 'Not authorized' });
     }
@@ -560,14 +558,14 @@ app.delete('/api/articles/:id', authenticate, asyncHandler(async (req, res) => {
     });
 }));
 
-app.patch('/api/articles/:id/views', asyncHandler(async (req, res) => {
+app.patch('/api/articles/:id/views', withDB(asyncHandler(async (req, res) => {
     const article = await incrementViews(req.params.id);
     res.json({
         success: true,
         message: 'Views incremented',
         data: article
     });
-}));
+})));
 
 app.patch('/api/articles/:id/featured', authenticate, asyncHandler(async (req, res) => {
     if (!['admin', 'editor'].includes(req.user.role)) {
@@ -595,13 +593,13 @@ app.patch('/api/articles/:id/topper', authenticate, asyncHandler(async (req, res
     });
 }));
 
-app.get('/api/analytics/stats', asyncHandler(async (req, res) => {
+app.get('/api/analytics/stats', withDB(asyncHandler(async (req, res) => {
     const stats = await getArticleStats();
     res.json({ success: true, data: stats });
-}));
+})));
 
 // Database connection test endpoint
-app.get('/api/db-test', asyncHandler(async (req, res) => {
+app.get('/api/db-test', withDB(asyncHandler(async (req, res) => {
     try {
         const dbState = mongoose.connection.readyState;
         const stateMap = {
@@ -612,7 +610,6 @@ app.get('/api/db-test', asyncHandler(async (req, res) => {
         };
         
         if (dbState === 1) {
-            // Test with a simple query
             const testResult = await mongoose.connection.db.admin().ping();
             res.json({
                 success: true,
@@ -634,7 +631,7 @@ app.get('/api/db-test', asyncHandler(async (req, res) => {
             error: error.message
         });
     }
-}));
+})));
 
 // 404 handler
 app.use('*', (req, res) => {
