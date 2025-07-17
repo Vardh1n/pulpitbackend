@@ -75,7 +75,7 @@ const apiAccessMiddleware = (req, res, next) => {
 };
 
 // Apply API access middleware before CORS
-app.use(apiAccessMiddleware);
+//app.use(apiAccessMiddleware);
 
 app.use(cors({
     origin: true, // Allow all origins
@@ -101,17 +101,32 @@ const limiter = rateLimit({
 });
 app.use('/', limiter);
 
-// Database connection for serverless - using cached connection
-let cachedDb = null;
+// Add this before your routes
+app.use((req, res, next) => {
+    // Set a timeout for serverless functions (Vercel has 10s limit for hobby plan)
+    const timeout = setTimeout(() => {
+        if (!res.headersSent) {
+            res.status(504).json({
+                success: false,
+                message: 'Request timeout'
+            });
+        }
+    }, 9000); // 9 seconds to be safe
+    
+    res.on('finish', () => clearTimeout(timeout));
+    next();
+});
 
 async function connectToDatabase() {
-    if (cachedDb) {
+    if (cachedDb && mongoose.connection.readyState === 1) {
         return cachedDb;
     }
     
     try {
-        await connectDB();
-        cachedDb = true;
+        if (mongoose.connection.readyState === 0) {
+            await connectDB();
+        }
+        cachedDb = mongoose.connection;
         console.log('Successfully connected to MongoDB');
         return cachedDb;
     } catch (error) {
@@ -119,7 +134,6 @@ async function connectToDatabase() {
         throw error;
     }
 }
-
 // Database connection middleware for serverless
 const ensureDBConnection = async (req, res, next) => {
     try {
@@ -129,7 +143,8 @@ const ensureDBConnection = async (req, res, next) => {
         console.error('Database connection error:', error);
         res.status(500).json({
             success: false,
-            message: 'Database connection failed'
+            message: 'Database connection failed',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
         });
     }
 };
