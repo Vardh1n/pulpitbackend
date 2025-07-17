@@ -103,57 +103,25 @@ app.get('/health', (req, res) => {
     });
 });
 
-// CREATE - Create new article
-app.post('/articles', validateArticleData, asyncHandler(async (req, res) => {
-    const article = await createArticle(req.body);
-    res.status(201).json({
-        success: true,
-        message: 'Article created successfully',
-        data: article
-    });
-}));
-
-// READ - Get all articles with pagination
-app.get('/articles', asyncHandler(async (req, res) => {
-    const { page = 1, limit = 10, status = 'published' } = req.query;
-    const result = await getAllArticles(parseInt(page), parseInt(limit), status);
+// Root route - Add this to handle the domain root
+app.get('/', (req, res) => {
     res.json({
         success: true,
-        data: result
+        message: 'Pulpit Backend API',
+        version: '1.0.0',
+        endpoints: {
+            health: '/api/health',
+            articles: '/api/articles',
+            featured: '/api/articles/special/featured',
+            toppers: '/api/articles/special/toppers',
+            search: '/api/articles/search/title?q=query',
+            analytics: '/api/analytics/stats'
+        },
+        timestamp: new Date().toISOString()
     });
-}));
+});
 
-// READ - Get article by ID
-app.get('/articles/:id', asyncHandler(async (req, res) => {
-    const article = await getArticleById(req.params.id);
-    res.json({
-        success: true,
-        data: article
-    });
-}));
-
-// READ - Get articles by tags
-app.get('/articles/tags/:tags', asyncHandler(async (req, res) => {
-    const { page = 1, limit = 10 } = req.query;
-    const tags = req.params.tags.split(',').map(tag => tag.trim());
-    const result = await getArticlesByTags(tags, parseInt(page), parseInt(limit));
-    res.json({
-        success: true,
-        data: result
-    });
-}));
-
-// READ - Get articles by authors
-app.get('/articles/authors/:authors', asyncHandler(async (req, res) => {
-    const { page = 1, limit = 10 } = req.query;
-    const authors = req.params.authors.split(',').map(author => author.trim());
-    const result = await getArticlesByAuthors(authors, parseInt(page), parseInt(limit));
-    res.json({
-        success: true,
-        data: result
-    });
-}));
-
+// Move specific routes BEFORE the general /articles route
 // READ - Get topper articles
 app.get('/articles/special/toppers', asyncHandler(async (req, res) => {
     const { limit = 5 } = req.query;
@@ -211,6 +179,172 @@ app.get('/articles/search/full', asyncHandler(async (req, res) => {
 }));
 
 // READ - Get articles by date range
+app.get('/articles/date-range', asyncHandler(async (req, res) => {
+    const { startDate, endDate, page = 1, limit = 10 } = req.query;
+    
+    if (!startDate || !endDate) {
+        return res.status(400).json({
+            success: false,
+            message: 'Both startDate and endDate are required'
+        });
+    }
+    
+    const result = await getArticlesByDateRange(startDate, endDate, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get articles by tags
+app.get('/articles/tags/:tags', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const tags = req.params.tags.split(',').map(tag => tag.trim());
+    const result = await getArticlesByTags(tags, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get articles by authors
+app.get('/articles/authors/:authors', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const authors = req.params.authors.split(',').map(author => author.trim());
+    const result = await getArticlesByAuthors(authors, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get article by ID (move this before the general /articles route)
+app.get('/articles/:id', asyncHandler(async (req, res) => {
+    const article = await getArticleById(req.params.id);
+    res.json({
+        success: true,
+        data: article
+    });
+}));
+
+// READ - Get all articles with pagination (move this to the end)
+app.get('/articles', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10, status = 'published' } = req.query;
+    const result = await getAllArticles(parseInt(page), parseInt(limit), status);
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// CREATE - Create new article
+app.post('/articles', validateArticleData, asyncHandler(async (req, res) => {
+    const article = await createArticle(req.body);
+    res.status(201).json({
+        success: true,
+        message: 'Article created successfully',
+        data: article
+    });
+}));
+
+// READ - Get all articles (public access)
+app.get('/articles', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const result = await getAllArticles(parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get article by ID (public access)
+app.get('/articles/:id', asyncHandler(async (req, res) => {
+    const article = await getArticleById(req.params.id);
+    res.json({
+        success: true,
+        data: article
+    });
+}));
+
+// READ - Get articles by tags (public access)
+app.get('/articles/tags/:tags', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const tags = req.params.tags.split(',').map(tag => tag.trim());
+    const result = await getArticlesByTags(tags, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get articles by authors (public access)
+app.get('/articles/authors/:authors', asyncHandler(async (req, res) => {
+    const { page = 1, limit = 10 } = req.query;
+    const authors = req.params.authors.split(',').map(author => author.trim());
+    const result = await getArticlesByAuthors(authors, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get topper articles (public access)
+app.get('/articles/special/toppers', asyncHandler(async (req, res) => {
+    const { limit = 5 } = req.query;
+    const articles = await getTopperArticles(parseInt(limit));
+    res.json({
+        success: true,
+        data: articles
+    });
+}));
+
+// READ - Get featured articles (public access)
+app.get('/articles/special/featured', asyncHandler(async (req, res) => {
+    const { limit = 10 } = req.query;
+    const articles = await getFeaturedArticles(parseInt(limit));
+    res.json({
+        success: true,
+        data: articles
+    });
+}));
+
+// READ - Search articles by title (public access)
+app.get('/articles/search/title', asyncHandler(async (req, res) => {
+    const { q, page = 1, limit = 10 } = req.query;
+    
+    if (!q) {
+        return res.status(400).json({
+            success: false,
+            message: 'Search query is required'
+        });
+    }
+    
+    const result = await searchArticlesByTitle(q, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Full text search (public access)
+app.get('/articles/search/full', asyncHandler(async (req, res) => {
+    const { q, page = 1, limit = 10 } = req.query;
+    
+    if (!q) {
+        return res.status(400).json({
+            success: false,
+            message: 'Search query is required'
+        });
+    }
+    
+    const result = await searchArticles(q, parseInt(page), parseInt(limit));
+    res.json({
+        success: true,
+        data: result
+    });
+}));
+
+// READ - Get articles by date range (public access)
 app.get('/articles/date-range', asyncHandler(async (req, res) => {
     const { startDate, endDate, page = 1, limit = 10 } = req.query;
     
